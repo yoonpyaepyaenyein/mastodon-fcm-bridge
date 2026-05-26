@@ -1,0 +1,18 @@
+{
+  "name": "xemele-push-bridge",
+  "version": "1.0.0",
+  "description": "Mastodon to Firebase Cloud Messaging bridge for Xemele/Ibram Museus mobile app",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "@vercel/kv": "^2.0.0",
+    "firebase-admin": "^12.7.0",
+    "http_ece": "^1.2.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
