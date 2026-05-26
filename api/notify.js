@@ -1,4 +1,5 @@
 import ece from 'http_ece';
+import { createECDH } from 'crypto';
 import { getSubscription, deleteSubscription } from '../lib/db.js';
 import { sendFcmNotification } from '../lib/firebase.js';
 
@@ -94,14 +95,17 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Missing dh or salt headers' });
     }
 
+    const ecdh = createECDH('prime256v1');
+    ecdh.setPrivateKey(Buffer.from(sub.keys.privateKey, 'base64'));
+
     let decrypted;
     try {
       decrypted = ece.decrypt(rawBody, {
         version: 'aesgcm',
-        privateKey: Buffer.from(sub.keys.privateKey, 'base64'),
-        dh: fromUrlSafeBase64(dh),
-        salt: fromUrlSafeBase64(salt),
-        authSecret: fromUrlSafeBase64(sub.keys.auth),
+        privateKey: ecdh,
+        authSecret: Buffer.from(sub.keys.auth, 'base64'),
+        dh: dh,
+        salt: salt,
       });
     } catch (decryptErr) {
       console.error('[notify] DECRYPT FAILED:', decryptErr.message);
