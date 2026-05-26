@@ -70,32 +70,48 @@ export default async function handler(req, res) {
   }
 
   try {
+    console.log('[notify] Subscription id:', id);
     const sub = await getSubscription(id);
     if (!sub) {
+      console.warn('[notify] Subscription not found in KV');
       return res.status(404).json({ error: 'Subscription not found' });
     }
+    console.log('[notify] Found sub. instance:', sub.mastodonInstance, 'has fcmToken:', !!sub.fcmToken);
 
     const rawBody = await readRawBody(req);
+    console.log('[notify] Raw body length:', rawBody.length);
 
     const cryptoKeyHeader = req.headers['crypto-key'];
     const encryptionHeader = req.headers['encryption'];
+    console.log('[notify] crypto-key header:', cryptoKeyHeader);
+    console.log('[notify] encryption header:', encryptionHeader);
 
     const dh = parseHeaderParam(cryptoKeyHeader, 'dh');
     const salt = parseHeaderParam(encryptionHeader, 'salt');
 
     if (!dh || !salt) {
+      console.warn('[notify] Missing dh or salt');
       return res.status(400).json({ error: 'Missing dh or salt headers' });
     }
 
-    const decrypted = ece.decrypt(rawBody, {
-      version: 'aesgcm',
-      privateKey: Buffer.from(sub.keys.privateKey, 'base64'),
-      dh: fromUrlSafeBase64(dh),
-      salt: fromUrlSafeBase64(salt),
-      authSecret: fromUrlSafeBase64(sub.keys.auth),
-    });
+    let decrypted;
+    try {
+      decrypted = ece.decrypt(rawBody, {
+        version: 'aesgcm',
+        privateKey: Buffer.from(sub.keys.privateKey, 'base64'),
+        dh: fromUrlSafeBase64(dh),
+        salt: fromUrlSafeBase64(salt),
+        authSecret: fromUrlSafeBase64(sub.keys.auth),
+      });
+    } catch (decryptErr) {
+      console.error('[notify] DECRYPT FAILED:', decryptErr.message);
+      console.error('[notify] Stack:', decryptErr.stack);
+      return res.status(500).json({ error: 'Decrypt failed', message: decryptErr.message });
+    }
+    console.log('[notify] Decrypted length:', decrypted.length);
 
     const pushPayload = JSON.parse(decrypted.toString('utf-8'));
+    console.log('[notify] Push payload:', JSON.stringify(pushPayload));
 
     const notificationId = pushPayload.notification_id;
     const accessToken = pushPayload.access_token || sub.mastodonAccessToken;
@@ -108,6 +124,8 @@ export default async function handler(req, res) {
     );
 
     if (!notifResponse.ok) {
+      const errText = await notifResponse.text();
+      console.error('[notify] Mastodon fetch failed:', notifResponse.status, errText);
       return res.status(502).json({
         error: 'Failed to fetch notification from Mastodon',
         status: notifResponse.status,
@@ -115,7 +133,9 @@ export default async function handler(req, res) {
     }
 
     const notification = await notifResponse.json();
+    console.log('[notify] Notification type:', notification.type);
     const { title, body } = buildNotificationContent(notification);
+    console.log('[notify] Sending FCM. Title:', title);
 
     const fcmResult = await sendFcmNotification(sub.fcmToken, title, body, {
       notification_id: notification.id,
@@ -125,16 +145,21 @@ export default async function handler(req, res) {
     });
 
     if (!fcmResult.success && fcmResult.isInvalidToken) {
+      console.warn('[notify] FCM token invalid, removing subscription');
       await deleteSubscription(id);
       return res.status(200).json({ message: 'Token invalid, subscription removed' });
     }
 
     if (!fcmResult.success) {
+      console.error('[notify] FCM send failed:', fcmResult.error);
       return res.status(500).json({ error: 'FCM send failed', details: fcmResult.error });
     }
 
+    console.log('[notify] FCM sent. messageId:', fcmResult.messageId);
     return res.status(200).json({ message: 'Notification sent', messageId: fcmResult.messageId });
   } catch (error) {
+    console.error('[notify] UNCAUGHT ERROR:', error.message);
+    console.error('[notify] Stack:', error.stack);
     return res.status(500).json({
       error: 'Internal server error',
       message: error.message,
