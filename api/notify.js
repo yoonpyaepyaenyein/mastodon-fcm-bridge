@@ -35,24 +35,31 @@ function parseHeaderParam(header, key) {
 function buildNotificationContent(notification) {
   const type = notification.type;
   const account = notification.account?.display_name || notification.account?.username || 'Someone';
+  const statusContent = stripHtml(notification.status?.content || '');
+  const isDirect = notification.status?.visibility === 'direct';
 
   switch (type) {
     case 'mention':
-      return { title: `${account} mentioned you`, body: stripHtml(notification.status?.content || '') };
+      if (isDirect) {
+        return { title: `${account} sent you a message`, body: statusContent };
+      }
+      return { title: `${account} mentioned you`, body: statusContent };
     case 'favourite':
-      return { title: `${account} favourited your post`, body: stripHtml(notification.status?.content || '') };
+      return { title: `${account} favourited your post`, body: statusContent };
     case 'reblog':
-      return { title: `${account} boosted your post`, body: stripHtml(notification.status?.content || '') };
+      return { title: `${account} boosted your post`, body: statusContent };
     case 'follow':
       return { title: `${account} followed you`, body: '' };
     case 'follow_request':
       return { title: `${account} requested to follow you`, body: '' };
     case 'poll':
-      return { title: 'A poll has ended', body: stripHtml(notification.status?.content || '') };
+      return { title: 'A poll has ended', body: statusContent };
     case 'status':
-      return { title: `${account} posted`, body: stripHtml(notification.status?.content || '') };
+      return { title: `${account} posted`, body: statusContent };
+    case 'update':
+      return { title: `${account} edited a post`, body: statusContent };
     default:
-      return { title: 'New notification', body: '' };
+      return { title: `New notification from ${account}`, body: statusContent || type };
   }
 }
 

@@ -91,7 +91,9 @@ export default async function handler(req, res) {
               poll: true,
               status: true,
               follow_request: true,
+              update: true,
             },
+            policy: 'all',
           },
         }),
       }
