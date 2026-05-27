@@ -1,6 +1,10 @@
 import ece from "http_ece";
 import { createECDH } from "crypto";
-import { getSubscription, deleteSubscription } from "../lib/db.js";
+import {
+  getSubscription,
+  deleteSubscription,
+  claimNotificationDelivery,
+} from "../lib/db.js";
 import { sendFcmNotification } from "../lib/firebase.js";
 
 export const config = {
@@ -205,7 +209,56 @@ export default async function handler(req, res) {
     console.log("[notify] Push payload:", JSON.stringify(pushPayload));
 
     const notificationId = pushPayload.notification_id;
-    const accessToken = pushPayload.access_token || sub.mastodonAccessToken;
+    const incomingAccessToken = pushPayload.access_token;
+    const accessToken = incomingAccessToken || sub.mastodonAccessToken;
+
+    // Self-heal: Mastodon keeps a separate push subscription per access
+    // token, so old logins leave behind orphan records that fire on every
+    // notification. If this webhook came from a token we no longer track
+    // as the user's current one, ask Mastodon to delete that subscription
+    // and stop processing — the latest token's webhook will handle the
+    // actual FCM send. Over a couple of mentions this cleans Mastodon's
+    // database back to one subscription per user.
+    if (
+      incomingAccessToken &&
+      sub.mastodonAccessToken &&
+      incomingAccessToken !== sub.mastodonAccessToken
+    ) {
+      console.log(
+        "[notify] Orphan subscription detected, requesting Mastodon to delete it",
+      );
+      try {
+        const delRes = await fetch(
+          `${sub.mastodonInstance}/api/v1/push/subscription`,
+          {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${incomingAccessToken}` },
+          },
+        );
+        console.log("[notify] Orphan delete status:", delRes.status);
+      } catch (delErr) {
+        console.warn("[notify] Orphan delete failed:", delErr.message);
+      }
+      return res
+        .status(200)
+        .json({ message: "Orphan subscription cleaned up" });
+    }
+
+    // Safety net: if Mastodon ever delivers the same notification twice
+    // through the current subscription (network retry, etc.), collapse it.
+    const isFirstDelivery = await claimNotificationDelivery(
+      sub.fcmToken,
+      notificationId,
+    );
+    if (!isFirstDelivery) {
+      console.log(
+        "[notify] Duplicate notification suppressed:",
+        notificationId,
+      );
+      return res
+        .status(200)
+        .json({ message: "Duplicate notification suppressed" });
+    }
 
     const notifResponse = await fetch(
       `${sub.mastodonInstance}/api/v1/notifications/${notificationId}`,
