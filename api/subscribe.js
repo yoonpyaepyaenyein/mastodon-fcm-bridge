@@ -45,19 +45,37 @@ export default async function handler(req, res) {
   const normalizedInstance = mastodonInstance.replace(/\/$/, '');
 
   try {
+    // Reuse subscriptionId + VAPID keys if we've subscribed for this
+    // fcmToken+instance before, so the webhook URL & decryption keys stay
+    // stable. But we always re-POST to Mastodon below to refresh the
+    // push subscription (old access token may be revoked after logout).
+    let subscriptionId;
+    let keys;
     const existingId = await findSubscriptionId(fcmToken, normalizedInstance);
     if (existingId) {
       const existing = await getSubscription(existingId);
-      if (existing) {
-        return res.status(200).json({
-          subscriptionId: existingId,
-          message: 'Already subscribed',
-        });
+      if (existing && existing.keys?.privateKey && existing.keys?.auth) {
+        subscriptionId = existingId;
+        // Reuse existing private key + auth secret. Derive publicKey from
+        // private key (needed to send to Mastodon as p256dh).
+        const ecdh = crypto.createECDH('prime256v1');
+        ecdh.setPrivateKey(Buffer.from(existing.keys.privateKey, 'base64'));
+        const publicKey = ecdh.getPublicKey();
+        keys = {
+          publicKey: toUrlSafeBase64(publicKey),
+          privateKey: existing.keys.privateKey,
+          authSecret: toUrlSafeBase64(Buffer.from(existing.keys.auth, 'base64')),
+          authSecretRaw: existing.keys.auth,
+        };
+        console.log('[subscribe] reusing existing subscription:', subscriptionId);
       }
     }
 
-    const subscriptionId = randomUUID();
-    const keys = generateVapidKeys();
+    if (!subscriptionId) {
+      subscriptionId = randomUUID();
+      keys = generateVapidKeys();
+      console.log('[subscribe] creating new subscription:', subscriptionId);
+    }
 
     const bridgeBaseUrl = process.env.BRIDGE_BASE_URL;
     if (!bridgeBaseUrl) {
