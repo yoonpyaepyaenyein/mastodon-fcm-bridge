@@ -90,6 +90,19 @@ export default async function handler(req, res) {
 
     const webhookEndpoint = `${bridgeBaseUrl}/api/notify?id=${subscriptionId}`;
 
+    // Mastodon stores one push subscription per access token. New logins
+    // create new tokens, so old subscriptions linger and cause duplicate
+    // notifications. Delete any existing subscription for this access
+    // token before creating a fresh one. (Idempotent — 404 is fine.)
+    try {
+      await fetch(`${normalizedInstance}/api/v1/push/subscription`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${mastodonAccessToken}` },
+      });
+    } catch (delErr) {
+      console.warn("[subscribe] pre-delete failed:", delErr.message);
+    }
+
     const mastodonResponse = await fetch(
       `${normalizedInstance}/api/v1/push/subscription`,
       {
