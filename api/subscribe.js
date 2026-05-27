@@ -107,6 +107,19 @@ export default async function handler(req, res) {
       });
     }
 
+    // Diagnostic: log instance version to identify Mastodon vs Patchwork fork
+    try {
+      const instRes = await fetch(`${normalizedInstance}/api/v2/instance`);
+      if (instRes.ok) {
+        const inst = await instRes.json();
+        console.log('[subscribe] instance:', normalizedInstance, 'version:', inst.version, 'source_url:', inst.source_url);
+      } else {
+        console.log('[subscribe] instance v2 fetch failed:', instRes.status);
+      }
+    } catch (e) {
+      console.log('[subscribe] instance fetch error:', e.message);
+    }
+
     // Mastodon 4.3+: disable notification filtering so DMs/mentions from
     // strangers trigger push (otherwise they land silently in the request
     // inbox). Failure here must not break subscribe — older instances
@@ -129,11 +142,20 @@ export default async function handler(req, res) {
           }),
         }
       );
+      const policyBody = await policyRes.text();
       if (!policyRes.ok) {
-        console.warn('[subscribe] policy update failed:', policyRes.status, await policyRes.text());
+        console.warn('[subscribe] policy update failed:', policyRes.status, policyBody);
       } else {
-        console.log('[subscribe] notification policy set to accept-all');
+        console.log('[subscribe] policy PUT response:', policyBody);
       }
+
+      // Verify what the server actually saved
+      const verifyRes = await fetch(
+        `${normalizedInstance}/api/v1/notifications/policy`,
+        { headers: { Authorization: `Bearer ${mastodonAccessToken}` } }
+      );
+      const verifyBody = await verifyRes.text();
+      console.log('[subscribe] policy GET verify:', verifyRes.status, verifyBody);
     } catch (policyErr) {
       console.warn('[subscribe] policy update error:', policyErr.message);
     }
