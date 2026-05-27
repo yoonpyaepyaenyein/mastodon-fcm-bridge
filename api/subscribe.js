@@ -152,11 +152,10 @@ export default async function handler(req, res) {
             Authorization: `Bearer ${mastodonAccessToken}`,
           },
           body: JSON.stringify({
-            for_not_following: 'accept',
-            for_not_followers: 'accept',
-            for_new_accounts: 'accept',
-            for_private_mentions: 'accept',
-            for_limited_accounts: 'accept',
+            filter_not_following: false,
+            filter_not_followers: false,
+            filter_new_accounts: false,
+            filter_private_mentions: false,
           }),
         }
       );
