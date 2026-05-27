@@ -1,21 +1,21 @@
-import crypto from 'crypto';
-import { randomUUID } from 'crypto';
+import crypto from "crypto";
+import { randomUUID } from "crypto";
 import {
   saveSubscription,
   findSubscriptionId,
   getSubscription,
-} from '../lib/db.js';
+} from "../lib/db.js";
 
 function toUrlSafeBase64(buffer) {
   return buffer
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
 }
 
 function generateVapidKeys() {
-  const ecdh = crypto.createECDH('prime256v1');
+  const ecdh = crypto.createECDH("prime256v1");
   ecdh.generateKeys();
   const publicKey = ecdh.getPublicKey();
   const privateKey = ecdh.getPrivateKey();
@@ -23,26 +23,27 @@ function generateVapidKeys() {
 
   return {
     publicKey: toUrlSafeBase64(publicKey),
-    privateKey: privateKey.toString('base64'),
+    privateKey: privateKey.toString("base64"),
     authSecret: toUrlSafeBase64(authSecret),
-    authSecretRaw: authSecret.toString('base64'),
+    authSecretRaw: authSecret.toString("base64"),
   };
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
   const { fcmToken, mastodonInstance, mastodonAccessToken } = req.body || {};
 
   if (!fcmToken || !mastodonInstance || !mastodonAccessToken) {
     return res.status(400).json({
-      error: 'Missing required fields: fcmToken, mastodonInstance, mastodonAccessToken',
+      error:
+        "Missing required fields: fcmToken, mastodonInstance, mastodonAccessToken",
     });
   }
 
-  const normalizedInstance = mastodonInstance.replace(/\/$/, '');
+  const normalizedInstance = mastodonInstance.replace(/\/$/, "");
 
   try {
     // Reuse subscriptionId + VAPID keys if we've subscribed for this
@@ -58,28 +59,33 @@ export default async function handler(req, res) {
         subscriptionId = existingId;
         // Reuse existing private key + auth secret. Derive publicKey from
         // private key (needed to send to Mastodon as p256dh).
-        const ecdh = crypto.createECDH('prime256v1');
-        ecdh.setPrivateKey(Buffer.from(existing.keys.privateKey, 'base64'));
+        const ecdh = crypto.createECDH("prime256v1");
+        ecdh.setPrivateKey(Buffer.from(existing.keys.privateKey, "base64"));
         const publicKey = ecdh.getPublicKey();
         keys = {
           publicKey: toUrlSafeBase64(publicKey),
           privateKey: existing.keys.privateKey,
-          authSecret: toUrlSafeBase64(Buffer.from(existing.keys.auth, 'base64')),
+          authSecret: toUrlSafeBase64(
+            Buffer.from(existing.keys.auth, "base64"),
+          ),
           authSecretRaw: existing.keys.auth,
         };
-        console.log('[subscribe] reusing existing subscription:', subscriptionId);
+        console.log(
+          "[subscribe] reusing existing subscription:",
+          subscriptionId,
+        );
       }
     }
 
     if (!subscriptionId) {
       subscriptionId = randomUUID();
       keys = generateVapidKeys();
-      console.log('[subscribe] creating new subscription:', subscriptionId);
+      console.log("[subscribe] creating new subscription:", subscriptionId);
     }
 
     const bridgeBaseUrl = process.env.BRIDGE_BASE_URL;
     if (!bridgeBaseUrl) {
-      return res.status(500).json({ error: 'BRIDGE_BASE_URL not configured' });
+      return res.status(500).json({ error: "BRIDGE_BASE_URL not configured" });
     }
 
     const webhookEndpoint = `${bridgeBaseUrl}/api/notify?id=${subscriptionId}`;
@@ -87,9 +93,9 @@ export default async function handler(req, res) {
     const mastodonResponse = await fetch(
       `${normalizedInstance}/api/v1/push/subscription`,
       {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
           Authorization: `Bearer ${mastodonAccessToken}`,
         },
         body: JSON.stringify({
@@ -111,31 +117,18 @@ export default async function handler(req, res) {
               follow_request: true,
               update: true,
             },
-            policy: 'all',
+            policy: "all",
           },
         }),
-      }
+      },
     );
 
     if (!mastodonResponse.ok) {
       const errorText = await mastodonResponse.text();
       return res.status(mastodonResponse.status).json({
-        error: 'Failed to register with Mastodon',
+        error: "Failed to register with Mastodon",
         details: errorText,
       });
-    }
-
-    // Diagnostic: log instance version to identify Mastodon vs Patchwork fork
-    try {
-      const instRes = await fetch(`${normalizedInstance}/api/v2/instance`);
-      if (instRes.ok) {
-        const inst = await instRes.json();
-        console.log('[subscribe] instance:', normalizedInstance, 'version:', inst.version, 'source_url:', inst.source_url);
-      } else {
-        console.log('[subscribe] instance v2 fetch failed:', instRes.status);
-      }
-    } catch (e) {
-      console.log('[subscribe] instance fetch error:', e.message);
     }
 
     // Mastodon 4.3+: disable notification filtering so DMs/mentions from
@@ -146,9 +139,9 @@ export default async function handler(req, res) {
       const policyRes = await fetch(
         `${normalizedInstance}/api/v1/notifications/policy`,
         {
-          method: 'PUT',
+          method: "PUT",
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
             Authorization: `Bearer ${mastodonAccessToken}`,
           },
           body: JSON.stringify({
@@ -157,24 +150,13 @@ export default async function handler(req, res) {
             filter_new_accounts: false,
             filter_private_mentions: false,
           }),
-        }
+        },
       );
-      const policyBody = await policyRes.text();
       if (!policyRes.ok) {
-        console.warn('[subscribe] policy update failed:', policyRes.status, policyBody);
-      } else {
-        console.log('[subscribe] policy PUT response:', policyBody);
+        console.warn("[subscribe] policy update failed:", policyRes.status);
       }
-
-      // Verify what the server actually saved
-      const verifyRes = await fetch(
-        `${normalizedInstance}/api/v1/notifications/policy`,
-        { headers: { Authorization: `Bearer ${mastodonAccessToken}` } }
-      );
-      const verifyBody = await verifyRes.text();
-      console.log('[subscribe] policy GET verify:', verifyRes.status, verifyBody);
     } catch (policyErr) {
-      console.warn('[subscribe] policy update error:', policyErr.message);
+      console.warn("[subscribe] policy update error:", policyErr.message);
     }
 
     await saveSubscription(subscriptionId, {
@@ -190,11 +172,11 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       subscriptionId,
-      message: 'Subscription created successfully',
+      message: "Subscription created successfully",
     });
   } catch (error) {
     return res.status(500).json({
-      error: 'Internal server error',
+      error: "Internal server error",
       message: error.message,
     });
   }
