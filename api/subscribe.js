@@ -107,6 +107,37 @@ export default async function handler(req, res) {
       });
     }
 
+    // Mastodon 4.3+: disable notification filtering so DMs/mentions from
+    // strangers trigger push (otherwise they land silently in the request
+    // inbox). Failure here must not break subscribe — older instances
+    // don't expose this endpoint.
+    try {
+      const policyRes = await fetch(
+        `${normalizedInstance}/api/v1/notifications/policy`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${mastodonAccessToken}`,
+          },
+          body: JSON.stringify({
+            for_not_following: 'accept',
+            for_not_followers: 'accept',
+            for_new_accounts: 'accept',
+            for_private_mentions: 'accept',
+            for_limited_accounts: 'accept',
+          }),
+        }
+      );
+      if (!policyRes.ok) {
+        console.warn('[subscribe] policy update failed:', policyRes.status, await policyRes.text());
+      } else {
+        console.log('[subscribe] notification policy set to accept-all');
+      }
+    } catch (policyErr) {
+      console.warn('[subscribe] policy update error:', policyErr.message);
+    }
+
     await saveSubscription(subscriptionId, {
       fcmToken,
       mastodonInstance: normalizedInstance,
