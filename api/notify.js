@@ -86,6 +86,19 @@ const PATCHWORK_NOTI_TYPES = new Set([
   "follow_request",
 ]);
 
+// Determine whether a direct-message mention is a "conversation request".
+//
+// Mastodon's own filtering (NotifyService) decides this using internal
+// state the bridge can't see: whether the recipient follows the sender,
+// whether the recipient already replied earlier in the thread
+// (response_to_recipient?), and whether a NotificationPermission was
+// granted. Replicating that with the relationships API alone gives wrong
+// results in those edge cases.
+//
+// Instead we ask Mastodon directly: filtered notifications land in the
+// notification *requests* inbox. If the sender appears there, this DM is
+// a conversation request. This is the source of truth — it always matches
+// what the Mastodon UI shows.
 async function isStrangerDM(
   notification,
   mastodonInstance,
@@ -102,16 +115,33 @@ async function isStrangerDM(
   if (!senderId) return false;
 
   try {
-    const relResp = await fetch(
-      `${mastodonInstance}/api/v1/accounts/relationships?id[]=${senderId}`,
+    const reqResp = await fetch(
+      `${mastodonInstance}/api/v1/notifications/requests`,
       { headers: { Authorization: `Bearer ${mastodonAccessToken}` } },
     );
-    if (!relResp.ok) return false;
-    const relationships = await relResp.json();
-    const rel = Array.isArray(relationships) ? relationships[0] : null;
-    return rel ? !rel.following : false;
+    if (!reqResp.ok) {
+      console.warn(
+        "[notify] notification requests fetch not ok:",
+        reqResp.status,
+      );
+      return false;
+    }
+    const requests = await reqResp.json();
+    const isRequest =
+      Array.isArray(requests) &&
+      requests.some((r) => r.account?.id === senderId);
+    console.log(
+      "[notify] conversation request check for sender",
+      senderId,
+      "->",
+      isRequest,
+      "(requests count:",
+      Array.isArray(requests) ? requests.length : "n/a",
+      ")",
+    );
+    return isRequest;
   } catch (err) {
-    console.warn("[notify] Relationship fetch failed:", err.message);
+    console.warn("[notify] notification requests fetch failed:", err.message);
     return false;
   }
 }
