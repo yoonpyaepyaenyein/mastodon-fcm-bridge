@@ -46,6 +46,19 @@ export default async function handler(req, res) {
   const normalizedInstance = mastodonInstance.replace(/\/$/, "");
 
   try {
+    // Debug multi-device: compare across iOS/Android logins of the same
+    // account. If the access_token tails match, Mastodon reused one token
+    // for both devices (so it keeps only one push subscription). If the
+    // fcmToken tails match, the two devices somehow share an FCM token.
+    console.log(
+      "[subscribe] device fingerprint — instance:",
+      normalizedInstance,
+      "| accessToken tail:",
+      mastodonAccessToken.slice(-12),
+      "| fcmToken tail:",
+      fcmToken.slice(-12),
+    );
+
     // Reuse subscriptionId + VAPID keys if we've subscribed for this
     // fcmToken+instance before, so the webhook URL & decryption keys stay
     // stable. But we always re-POST to Mastodon below to refresh the
